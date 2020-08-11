@@ -41,6 +41,33 @@ func GenerateLicense(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func GetApp(w http.ResponseWriter, r *http.Request) {
+	//appName := mux.Vars(r)["name"]
+
+	var app = config.App{
+		Name: "test-app",
+		Alg:  "HS512",
+		Keys: config.Keys{
+			HMACSecret: "test-secret",
+		},
+	}
+
+	ReturnResponse(w, 200, app)
+}
+
+func GetAllApps(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	var l lcs.License
+	err := storage.LicenseHandler.GetByID(id, &l)
+	if err != nil {
+		ReturnError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ReturnResponse(w, 200, l)
+}
+
 func GetLicense(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/furkansenharputlu/f-license/config"
 
-	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/dgrijalva/jwt-go"
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -27,7 +27,7 @@ type License struct {
 	Token     string                 `bson:"token" json:"token"`
 	Claims    jwt.MapClaims          `bson:"claims" json:"claims"`
 	Active    bool                   `bson:"active" json:"active"`
-	Signature config.Signature       `bson:"-" json:"-"`
+	Keys      config.Keys           `bson:"keys" json:"keys"`
 	signKey   interface{}
 	verifyKey interface{}
 }
@@ -64,11 +64,11 @@ func (l *License) GetApp(appName string) (*config.App, error) {
 
 func (l *License) ApplyApp(appName string) error {
 	var alg string
-	var signature config.Signature
+	var keys config.Keys
+	emptyKeys := config.Keys{}
 
 	if appName == "" {
 		alg = l.GetAlg()
-		signature = config.Global.DefaultSignature
 	} else {
 		app, err := l.GetApp(appName)
 		if err != nil {
@@ -76,7 +76,7 @@ func (l *License) ApplyApp(appName string) error {
 		}
 
 		alg = app.Alg
-		signature = app.Signature
+		keys = app.Keys
 	}
 
 	if alg == "" {
@@ -84,7 +84,12 @@ func (l *License) ApplyApp(appName string) error {
 	}
 
 	l.Headers["alg"] = alg
-	l.Signature = signature
+
+	if keys == emptyKeys {
+		keys = config.Global.DefaultKeys
+	}
+
+	l.Keys = keys
 
 	return nil
 }
@@ -123,12 +128,19 @@ func (l *License) Generate() error {
 func (l *License) LoadSignKey() {
 
 	if strings.HasPrefix(l.GetAlg(), "HS") {
-		l.signKey = []byte(l.Signature.HMACSecret)
+		l.signKey = []byte(l.Keys.HMACSecret)
 	} else {
-		signBytes, err := ioutil.ReadFile(l.Signature.RSAPrivateKeyFile)
-		fatalf("Couldn't read rsa private key file: %s", err)
+		var signKeyInBytes []byte
+		var err error
+		if l.Keys.RSAPublicKey.ID == "" {
+			signKeyInBytes, err = ioutil.ReadFile(l.Keys.RSAPrivateKey.FilePath)
+			fatalf("Couldn't read rsa private key file: %s", err)
+		} else {
+			// TODO
+			logrus.Info("Find cert by Id: not implemented yet")
+		}
 
-		l.signKey, err = jwt.ParseRSAPrivateKeyFromPEM(signBytes)
+		l.signKey, err = jwt.ParseRSAPrivateKeyFromPEM(signKeyInBytes)
 		fatalf("Couldn't parse private key: %s", err)
 	}
 }
@@ -136,13 +148,19 @@ func (l *License) LoadSignKey() {
 func (l *License) LoadVerifyKey() {
 
 	if strings.HasPrefix(l.GetAlg(), "HS") {
-
-		l.verifyKey = []byte(l.Signature.HMACSecret)
+		l.verifyKey = []byte(l.Keys.HMACSecret)
 	} else {
-		verifyBytes, err := ioutil.ReadFile(l.Signature.RSAPublicKeyFile)
-		fatalf("Couldn't read public key: %s", err)
+		var verifyKeyInBytes []byte
+		var err error
+		if l.Keys.RSAPublicKey.ID == "" {
+			verifyKeyInBytes, err = ioutil.ReadFile(l.Keys.RSAPublicKey.FilePath)
+			fatalf("Couldn't read public key: %s", err)
+		} else {
+			// TODO
+			logrus.Info("Find cert by Id: not implemented yet")
+		}
 
-		l.verifyKey, err = jwt.ParseRSAPublicKeyFromPEM(verifyBytes)
+		l.verifyKey, err = jwt.ParseRSAPublicKeyFromPEM(verifyKeyInBytes)
 		fatalf("Couldn't parse public key: %s", err)
 	}
 }

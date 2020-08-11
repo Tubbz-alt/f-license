@@ -53,6 +53,10 @@ func GenerateRouter() *mux.Router {
 	// Endpoints called by product owners
 	adminRouter := r.PathPrefix("/admin").Subrouter()
 	adminRouter.Use(AuthenticationMiddleware)
+
+	adminRouter.HandleFunc("/apps", GetAllApps).Methods(http.MethodGet)
+	adminRouter.HandleFunc("/apps/{name}", GetApp).Methods(http.MethodGet)
+
 	adminRouter.HandleFunc("/licenses", GetAllLicenses).Methods(http.MethodGet)
 	adminRouter.HandleFunc("/licenses", GenerateLicense).Methods(http.MethodPost)
 	adminRouter.HandleFunc("/licenses/{id}", GetLicense).Methods(http.MethodGet)

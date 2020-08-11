@@ -11,19 +11,24 @@ import (
 var Global = &Config{}
 
 type Config struct {
-	Port             int             `json:"port"`
-	AdminSecret      string          `json:"admin_secret"`
-	Apps             map[string]*App `json:"apps"`
-	DefaultSignature Signature       `json:"default_signature"`
-	MongoURL         string          `json:"mongo_url"`
-	DBName           string          `json:"db_name"`
-	ServerOptions    ServerOptions   `json:"server_options"`
+	Port          int             `json:"port"`
+	AdminSecret   string          `json:"admin_secret"`
+	Apps          map[string]*App `json:"apps"`
+	DefaultKeys   Keys            `json:"default_keys"`
+	MongoURL      string          `json:"mongo_url"`
+	DBName        string          `json:"db_name"`
+	ServerOptions ServerOptions   `json:"server_options"`
 }
 
-type Signature struct {
-	HMACSecret        string `json:"hmac_secret"`
-	RSAPrivateKeyFile string `json:"rsa_private_key_file"`
-	RSAPublicKeyFile  string `json:"rsa_public_key_file"`
+type Keys struct {
+	HMACSecret    string `bson:"hmac_secret" json:"hmac_secret"`
+	RSAPrivateKey Key    `bson:"rsa_private_key" json:"rsa_private_key"`
+	RSAPublicKey  Key    `bson:"rsa_public_key" json:"rsa_public_key"`
+}
+
+type Key struct {
+	ID       string `bson:"id" json:"id"`
+	FilePath string `bson:"file_path" json:"file_path"`
 }
 
 func (c *Config) Load(filePath string) {
@@ -46,7 +51,7 @@ type ServerOptions struct {
 }
 
 type App struct {
-	Name      string    `json:"name"`
-	Alg       string    `json:"alg"`
-	Signature Signature `json:"signature"`
+	Name string `json:"name"`
+	Alg  string `json:"alg"`
+	Keys Keys   `json:"keys"`
 }

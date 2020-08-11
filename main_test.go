@@ -63,8 +63,8 @@ func TestMain(m *testing.M) {
 	}()
 
 	app := config.Global.Apps["test-app"]
-	app.Signature.RSAPrivateKeyFile = privateKeyFile.Name()
-	app.Signature.RSAPublicKeyFile = publicKeyFile.Name()
+	app.Keys.RSAPrivateKey.FilePath = privateKeyFile.Name()
+	app.Keys.RSAPublicKey.FilePath = publicKeyFile.Name()
 	app.Alg = "RS512"
 	config.Global.Apps["test-app"] = app
 
@@ -163,9 +163,13 @@ func TestClientVerifyLocally(t *testing.T) {
 			_ = publicKeyFile.Close()
 		}()
 
-		config.Global.DefaultSignature = config.Signature{
-			RSAPrivateKeyFile: privateKeyFile.Name(),
-			RSAPublicKeyFile:  publicKeyFile.Name(),
+		config.Global.DefaultKeys = config.Keys{
+			RSAPrivateKey: config.Key{
+				FilePath: privateKeyFile.Name(),
+			},
+			RSAPublicKey: config.Key{
+				FilePath: publicKeyFile.Name(),
+			},
 		}
 
 		l := sampleLicense(func(l *lcs.License) {
@@ -206,9 +210,13 @@ func TestClientVerifyRemotely(t *testing.T) {
 			_ = privateKeyFile.Close()
 			_ = publicKeyFile.Close()
 		}()
-		config.Global.DefaultSignature = config.Signature{
-			RSAPrivateKeyFile: privateKeyFile.Name(),
-			RSAPublicKeyFile:  publicKeyFile.Name(),
+		config.Global.DefaultKeys = config.Keys{
+			RSAPrivateKey: config.Key{
+				FilePath: privateKeyFile.Name(),
+			},
+			RSAPublicKey: config.Key{
+				FilePath: publicKeyFile.Name(),
+			},
 		}
 
 		l := sampleLicense(func(l *lcs.License) {
