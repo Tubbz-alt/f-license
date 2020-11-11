@@ -51,7 +51,7 @@ func main() {
 func GenerateRouter() *mux.Router {
 	r := mux.NewRouter()
 	// Endpoints called by product owners
-	adminRouter := r.PathPrefix("/admin").Subrouter()
+	adminRouter := r.PathPrefix("/f").Subrouter()
 	adminRouter.Use(AuthenticationMiddleware)
 
 	adminRouter.HandleFunc("/apps", GetAllApps).Methods(http.MethodGet)
@@ -63,6 +63,11 @@ func GenerateRouter() *mux.Router {
 	adminRouter.HandleFunc("/licenses/{id}/activate", ChangeLicenseActiveness).Methods(http.MethodPut)
 	adminRouter.HandleFunc("/licenses/{id}/inactivate", ChangeLicenseActiveness).Methods(http.MethodPut)
 	adminRouter.HandleFunc("/licenses/{id}/delete", DeleteLicense).Methods(http.MethodDelete)
+
+	adminRouter.HandleFunc("/keys", GetAllKeys).Methods(http.MethodGet)
+	adminRouter.HandleFunc("/keys/{type}", UploadKey).Methods(http.MethodPost)
+	adminRouter.HandleFunc("/keys/{id}", GetKey).Methods(http.MethodGet)
+	adminRouter.HandleFunc("/keys/{id}/delete", DeleteKey).Methods(http.MethodDelete)
 
 	// Endpoints called by product instances having license
 	r.HandleFunc("/license/verify", VerifyLicense).Methods(http.MethodPost)

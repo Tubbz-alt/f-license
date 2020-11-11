@@ -1,35 +1,54 @@
 package lcs
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"io/ioutil"
+
+	"reflect"
 	"strings"
 
 	"github.com/furkansenharputlu/f-license/config"
 
 	"github.com/dgrijalva/jwt-go"
-	"github.com/sirupsen/logrus"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+
 )
 
-func fatalf(format string, err error) {
-	if err != nil {
-		logrus.Fatalf(format, err)
-	}
+type License struct {
+	ID           string                 `bson:"id" json:"id"`
+	Headers      map[string]interface{} `bson:"headers" json:"headers"`
+	Token        string                 `bson:"token" json:"token"`
+	Claims       jwt.MapClaims          `bson:"claims" json:"claims"`
+	Active       bool                   `bson:"active" json:"active"`
+	Keys         config.Keys            `bson:"keys" json:"keys"`
+	SignKey      interface{}
+	SignKeyRaw   []byte
+	VerifyKey    interface{}
+	VerifyKeyRaw []byte
 }
 
-type License struct {
-	ID        primitive.ObjectID     `bson:"_id,omitempty" json:"id"`
-	Headers   map[string]interface{} `bson:"headers" json:"headers"`
-	Hash      string                 `bson:"hash" json:"-"`
-	Token     string                 `bson:"token" json:"token"`
-	Claims    jwt.MapClaims          `bson:"claims" json:"claims"`
-	Active    bool                   `bson:"active" json:"active"`
-	Keys      config.Keys           `bson:"keys" json:"keys"`
-	signKey   interface{}
-	verifyKey interface{}
+func (l *License) MarshalJSON() ([]byte, error) {
+
+	res := map[string]interface{}{
+		"id":      l.ID,
+		"headers": l.Headers,
+		"token":   l.Token,
+		"claims":  l.Claims,
+		"active":  l.Active,
+	}
+
+	if strings.HasPrefix(l.GetAlg(), "HS") {
+		res["key_id"] = l.Keys.HMACSecret.KeyID
+	} else if strings.HasPrefix(l.GetAlg(), "RS") {
+		res["key_id"] = map[string]string{
+			"public_key_id":  l.Keys.RSAPublicKey.KeyID,
+			"private_key_id": l.Keys.RSAPrivateKey.KeyID,
+		}
+	}
+
+	return json.Marshal(res)
 }
 
 func (l *License) GetAppName() (appName string) {
@@ -40,6 +59,10 @@ func (l *License) GetAppName() (appName string) {
 	}
 
 	return
+}
+
+func (l *License) SetAppName(appName string) {
+	l.Headers["app"] = appName
 }
 
 // GetAlg returns alg defined in the license header.
@@ -62,13 +85,15 @@ func (l *License) GetApp(appName string) (*config.App, error) {
 	return app, nil
 }
 
-func (l *License) ApplyApp(appName string) error {
+func (l *License) ApplyApp() error {
 	var alg string
 	var keys config.Keys
 	emptyKeys := config.Keys{}
 
+	appName := l.GetAppName()
 	if appName == "" {
 		alg = l.GetAlg()
+		keys = l.Keys
 	} else {
 		app, err := l.GetApp(appName)
 		if err != nil {
@@ -85,7 +110,7 @@ func (l *License) ApplyApp(appName string) error {
 
 	l.Headers["alg"] = alg
 
-	if keys == emptyKeys {
+	if reflect.DeepEqual(keys, emptyKeys) {
 		keys = config.Global.DefaultKeys
 	}
 
@@ -100,69 +125,50 @@ func (l *License) Generate() error {
 		l.Headers = make(map[string]interface{})
 	}
 
-	err := l.ApplyApp(l.GetAppName())
-	if err != nil {
-		return err
-	}
-
 	token := jwt.NewWithClaims(jwt.GetSigningMethod(l.GetAlg()), l.Claims)
 	token.Header = l.Headers
 
-	l.LoadSignKey()
-	l.LoadVerifyKey()
-
-	signedString, err := token.SignedString(l.signKey)
+	signedString, err := token.SignedString(l.SignKey)
 	if err != nil {
 		return err
 	}
 
 	l.Token = signedString
 
-	h := fnv.New64a()
-	h.Write([]byte(signedString))
-	l.Hash = fmt.Sprintf("%v", h.Sum64())
+	l.ID = HexSHA256([]byte(signedString))
 
 	return nil
 }
 
-func (l *License) LoadSignKey() {
-
-	if strings.HasPrefix(l.GetAlg(), "HS") {
-		l.signKey = []byte(l.Keys.HMACSecret)
-	} else {
-		var signKeyInBytes []byte
-		var err error
-		if l.Keys.RSAPublicKey.ID == "" {
-			signKeyInBytes, err = ioutil.ReadFile(l.Keys.RSAPrivateKey.FilePath)
-			fatalf("Couldn't read rsa private key file: %s", err)
-		} else {
-			// TODO
-			logrus.Info("Find cert by Id: not implemented yet")
-		}
-
-		l.signKey, err = jwt.ParseRSAPrivateKeyFromPEM(signKeyInBytes)
-		fatalf("Couldn't parse private key: %s", err)
-	}
+func HexSHA256(key []byte) string {
+	certSHA := sha256.Sum256(key)
+	return hex.EncodeToString(certSHA[:])
 }
 
-func (l *License) LoadVerifyKey() {
 
-	if strings.HasPrefix(l.GetAlg(), "HS") {
-		l.verifyKey = []byte(l.Keys.HMACSecret)
-	} else {
-		var verifyKeyInBytes []byte
-		var err error
-		if l.Keys.RSAPublicKey.ID == "" {
-			verifyKeyInBytes, err = ioutil.ReadFile(l.Keys.RSAPublicKey.FilePath)
-			fatalf("Couldn't read public key: %s", err)
-		} else {
-			// TODO
-			logrus.Info("Find cert by Id: not implemented yet")
+func (l *License) EncryptKeys() error {
+
+	/*switch l.signKey.(type) {
+	case *rsa.PrivateKey:
+		ciphertext, err := Encrypt([]byte(config.Global.AdminSecret), l.signKeyRaw)
+		if err != nil {
+			return err
 		}
 
-		l.verifyKey, err = jwt.ParseRSAPublicKeyFromPEM(verifyKeyInBytes)
-		fatalf("Couldn't parse public key: %s", err)
+		l.Keys. = string(ciphertext)
 	}
+	if l.signKey == l.Keys.HMACSecret {
+		ciphertext, err := Encrypt([]byte(config.Global.AdminSecret), []byte(l.Keys.HMACSecret))
+		if err != nil {
+			return err
+		}
+
+		l.Keys.HMACSecret = string(ciphertext)
+	} else {
+
+	}*/
+	return nil
+
 }
 
 func (l *License) IsLicenseValid(tokenString string) (bool, error) {
@@ -170,22 +176,14 @@ func (l *License) IsLicenseValid(tokenString string) (bool, error) {
 		return false, nil
 	}
 
-	if l.verifyKey == nil {
-		err := l.ApplyApp(l.GetAppName())
-		if err != nil {
-			return false, nil
-		}
-		l.LoadVerifyKey()
-	}
-
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Don't forget to validate the alg is what you expect:
 		switch token.Method.(type) {
 		case *jwt.SigningMethodHMAC:
-			return l.verifyKey, nil
+			return l.VerifyKey, nil
 		case *jwt.SigningMethodRSA:
 
-			return l.verifyKey, nil
+			return l.VerifyKey, nil
 		default:
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}

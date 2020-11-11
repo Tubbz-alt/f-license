@@ -11,24 +11,46 @@ import (
 var Global = &Config{}
 
 type Config struct {
-	Port          int             `json:"port"`
-	AdminSecret   string          `json:"admin_secret"`
-	Apps          map[string]*App `json:"apps"`
-	DefaultKeys   Keys            `json:"default_keys"`
-	MongoURL      string          `json:"mongo_url"`
-	DBName        string          `json:"db_name"`
-	ServerOptions ServerOptions   `json:"server_options"`
+	Port             int             `json:"port"`
+	ControlAPISecret string          `json:"control_api_secret"`
+	Secret           string          `json:"secret"`
+	Apps             map[string]*App `json:"apps"`
+	DefaultKeys      Keys            `json:"default_keys"`
+	MongoURL         string          `json:"mongo_url"`
+	DBName           string          `json:"db_name"`
+	ServerOptions    ServerOptions   `json:"server_options"`
 }
 
 type Keys struct {
-	HMACSecret    string `bson:"hmac_secret" json:"hmac_secret"`
-	RSAPrivateKey Key    `bson:"rsa_private_key" json:"rsa_private_key"`
-	RSAPublicKey  Key    `bson:"rsa_public_key" json:"rsa_public_key"`
+	HMACSecret    Key `bson:"hmac_secret" json:"hmac_secret"`
+	RSAPrivateKey Key `bson:"rsa_private_key" json:"rsa_private_key"`
+	RSAPublicKey  Key `bson:"rsa_public_key" json:"rsa_public_key"`
+}
+
+type RSAPair struct {
+	Private Key `json:"private"`
+	Public  Key `json:"public"`
 }
 
 type Key struct {
-	ID       string `bson:"id" json:"id"`
-	FilePath string `bson:"file_path" json:"file_path"`
+	Name      string `bson:"name" json:"name"`
+	Type      string `bson:"type" json:"type"`
+	FilePath  string `bson:"-" json:"file_path"`
+	Raw       string `bson:"-" json:"raw"`
+	KeyID     string `bson:"key_id" json:"key_id"`
+	Encrypted []byte `bson:"encrypted" json:"-"`
+}
+
+func (k *Key) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Name  string `json:"name"`
+		KeyID string `json:"key_id"`
+		Raw   string `json:"raw"`
+	}{
+		Name:  k.Name,
+		KeyID: k.KeyID,
+		Raw:   k.Raw,
+	})
 }
 
 func (c *Config) Load(filePath string) {

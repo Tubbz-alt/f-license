@@ -2,14 +2,12 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
+
 	"encoding/json"
-	"encoding/pem"
+
 	"io"
 	"io/ioutil"
-	"math/big"
+
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,14 +15,12 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/furkansenharputlu/f-license/client"
 	"github.com/furkansenharputlu/f-license/config"
 	"github.com/furkansenharputlu/f-license/lcs"
 	"github.com/furkansenharputlu/f-license/storage"
 
-	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -56,17 +52,7 @@ func TestMain(m *testing.M) {
 	storage.Connect()
 	_ = storage.LicenseHandler.DropDatabase()
 
-	publicKeyFile, privateKeyFile := genKeys()
-	defer func() {
-		_ = privateKeyFile.Close()
-		_ = publicKeyFile.Close()
-	}()
-
-	app := config.Global.Apps["test-app"]
-	app.Keys.RSAPrivateKey.FilePath = privateKeyFile.Name()
-	app.Keys.RSAPublicKey.FilePath = publicKeyFile.Name()
-	app.Alg = "RS512"
-	config.Global.Apps["test-app"] = app
+	lcs.SampleApp()
 
 	ret := m.Run()
 	tr.server.Close()
@@ -75,14 +61,8 @@ func TestMain(m *testing.M) {
 }
 
 func Reset() {
-	ResetTestConfig()
+	lcs.ResetTestConfig()
 	_ = storage.LicenseHandler.DropDatabase()
-}
-
-func ResetTestConfig() {
-	app := config.Global.Apps["test-app"]
-	app.Alg = "RS512"
-	config.Global.Apps["test-app"] = app
 }
 
 func (tr *TestRunner) Run(t *testing.T, tc *TestCase) *http.Response {
@@ -105,7 +85,7 @@ func (tr *TestRunner) Run(t *testing.T, tc *TestCase) *http.Response {
 	r, err := http.NewRequest(tc.Method, tr.server.URL+tc.Path, reader)
 	assert.NoError(t, err)
 
-	r.Header.Set("Authorization", config.Global.AdminSecret)
+	r.Header.Set("Authorization", config.Global.ControlAPISecret)
 
 	if len(formParams) != 0 {
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -125,59 +105,32 @@ func (tr *TestRunner) Run(t *testing.T, tc *TestCase) *http.Response {
 	return resp
 }
 
-func sampleLicense(lGen ...func(l *lcs.License)) (l *lcs.License) {
-	l = &lcs.License{
-		Active: true,
-		Headers: map[string]interface{}{
-			"typ": "Trial",
-		},
-		Claims: jwt.MapClaims{
-			"name":    "Furkan",
-			"address": "Istanbul, Turkey",
-		},
-	}
-
-	if len(lGen) > 0 {
-		lGen[0](l)
-	}
-	return
-}
-
 func TestClientVerifyLocally(t *testing.T) {
 	defer Reset()
 	t.Run("HS512", func(t *testing.T) {
-		l := sampleLicense(func(l *lcs.License) {
+		l := lcs.SampleLicense(func(l *lcs.License) {
 			l.Headers["alg"] = "HS512"
 		})
 
+		LoadSignKey(l)
+		LoadVerifyKey(l)
+
 		_ = l.Generate()
 
-		verified, _ := client.VerifyLocally("test-secret", l.Token)
+		verified, _ := client.VerifyLocally(lcs.TestHMACSecret, l.Token)
 		assert.True(t, verified)
 	})
 
 	t.Run("RS256", func(t *testing.T) {
-		publicKeyFile, privateKeyFile := genKeys()
-		defer func() {
-			_ = privateKeyFile.Close()
-			_ = publicKeyFile.Close()
-		}()
-
-		config.Global.DefaultKeys = config.Keys{
-			RSAPrivateKey: config.Key{
-				FilePath: privateKeyFile.Name(),
-			},
-			RSAPublicKey: config.Key{
-				FilePath: publicKeyFile.Name(),
-			},
-		}
-
-		l := sampleLicense(func(l *lcs.License) {
+		l := lcs.SampleLicense(func(l *lcs.License) {
 			l.Headers["alg"] = "RS256"
 		})
+
+		LoadSignKey(l)
+		LoadVerifyKey(l)
 		_ = l.Generate()
 
-		pkInBytes, _ := ioutil.ReadFile(publicKeyFile.Name())
+		pkInBytes, _ := ioutil.ReadFile(l.Keys.RSAPublicKey.FilePath)
 		publicKey := string(pkInBytes)
 
 		verified, _ := client.VerifyLocally(publicKey, l.Token)
@@ -190,7 +143,7 @@ func TestClientVerifyRemotely(t *testing.T) {
 	path := "/admin/licenses"
 
 	t.Run("HS512", func(t *testing.T) {
-		l := sampleLicense(func(l *lcs.License) {
+		l := lcs.SampleLicense(func(l *lcs.License) {
 			l.Headers["alg"] = "HS512"
 		})
 
@@ -205,7 +158,7 @@ func TestClientVerifyRemotely(t *testing.T) {
 	})
 
 	t.Run("RS256", func(t *testing.T) {
-		publicKeyFile, privateKeyFile := genKeys()
+		publicKeyFile, privateKeyFile := lcs.SampleKeys()
 		defer func() {
 			_ = privateKeyFile.Close()
 			_ = publicKeyFile.Close()
@@ -219,7 +172,7 @@ func TestClientVerifyRemotely(t *testing.T) {
 			},
 		}
 
-		l := sampleLicense(func(l *lcs.License) {
+		l := lcs.SampleLicense(func(l *lcs.License) {
 			l.Headers["alg"] = "RS256"
 		})
 		_ = l.Generate()
@@ -236,7 +189,7 @@ func TestClientVerifyRemotely(t *testing.T) {
 }
 
 func TestLicense_GetApp(t *testing.T) {
-	l := sampleLicense()
+	l := lcs.SampleLicense()
 
 	app, _ := l.GetApp("test-app")
 	assert.Equal(t, config.Global.Apps["test-app"], app)
@@ -250,7 +203,7 @@ func TestLicense_GetApp(t *testing.T) {
 
 func TestLicense_ApplyApp(t *testing.T) {
 
-	l := sampleLicense(func(l *lcs.License) {
+	l := lcs.SampleLicense(func(l *lcs.License) {
 		l.Headers["alg"] = "HS512"
 	})
 
@@ -260,35 +213,9 @@ func TestLicense_ApplyApp(t *testing.T) {
 
 	t.Run("with applying", func(t *testing.T) {
 		l.Headers["app"] = "test-app"
-		_ = l.ApplyApp(l.GetAppName())
+		_ = l.ApplyApp()
 
 		assert.Equal(t, "RS512", l.GetAlg())
 		assert.Equal(t, config.Global.Apps["test-app"].Alg, l.GetAlg())
 	})
-}
-
-func genKeys() (publicKeyFile *os.File, privateKeyFile *os.File) {
-	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
-
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, _ := rand.Int(rand.Reader, serialNumberLimit)
-	template := &x509.Certificate{}
-	template.SerialNumber = serialNumber
-	template.BasicConstraintsValid = true
-	template.NotBefore = time.Now()
-	template.NotAfter = template.NotBefore.Add(time.Hour)
-
-	derBytes, _ := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
-
-	var certPem bytes.Buffer
-	pem.Encode(&certPem, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	publicKeyFile, _ = ioutil.TempFile("", "key.pem")
-	_, _ = publicKeyFile.Write(certPem.Bytes())
-
-	var keyPem bytes.Buffer
-	_ = pem.Encode(&keyPem, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
-	privateKeyFile, _ = ioutil.TempFile("", "key.pem")
-	_, _ = privateKeyFile.Write(keyPem.Bytes())
-
-	return publicKeyFile, privateKeyFile
 }
